@@ -38,6 +38,7 @@ type InferenceServiceStatus struct {
 	// - ExplainerReady: explainer readiness condition; <br/>
 	// - RoutesReady (serverless mode only): aggregated routing condition, i.e. endpoint readiness condition; <br/>
 	// - LatestDeploymentReady (serverless mode only): aggregated configuration condition, i.e. latest deployment readiness condition; <br/>
+	// - TrafficAvailable: set when the service can currently receive traffic, independent of rollout status; <br/>
 	// - Ready: aggregated condition; <br/>
 	duckv1.Status `json:",inline"`
 	// Addressable endpoint for the InferenceService
@@ -128,6 +129,11 @@ const (
 	RoutesReady apis.ConditionType = "RoutesReady"
 	// LatestDeploymentReady is set when underlying configurations for all components have reported readiness.
 	LatestDeploymentReady apis.ConditionType = "LatestDeploymentReady"
+	// TrafficAvailable is set when the inference service is currently able to receive traffic,
+	// independent of whether the latest update has finished reconciling.
+	// During a rollout, this remains True as long as a previously ready revision is still serving traffic,
+	// even though the Ready condition may be Unknown.
+	TrafficAvailable apis.ConditionType = "TrafficAvailable"
 	// Stopped is set when the inference service has been stopped and all related objects are deleted
 	Stopped apis.ConditionType = "Stopped"
 )
@@ -287,6 +293,21 @@ func (ss *InferenceServiceStatus) InitializeConditions() {
 // IsReady returns the overall readiness for the inference service.
 func (ss *InferenceServiceStatus) IsReady() bool {
 	return conditionSet.Manage(ss).IsHappy()
+}
+
+// MarkTrafficAvailable sets the TrafficAvailable condition to True.
+func (ss *InferenceServiceStatus) MarkTrafficAvailable() {
+	conditionSet.Manage(ss).MarkTrue(TrafficAvailable)
+}
+
+// MarkTrafficUnavailable sets the TrafficAvailable condition to False with a reason and message.
+func (ss *InferenceServiceStatus) MarkTrafficUnavailable(reason, message string) {
+	conditionSet.Manage(ss).MarkFalse(TrafficAvailable, reason, message)
+}
+
+// MarkTrafficAvailableUnknown sets the TrafficAvailable condition to Unknown with a reason and message.
+func (ss *InferenceServiceStatus) MarkTrafficAvailableUnknown(reason, message string) {
+	conditionSet.Manage(ss).MarkUnknown(TrafficAvailable, reason, message)
 }
 
 // GetCondition returns the condition by name.

@@ -418,11 +418,50 @@ func (r *InferenceServiceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	return ctrl.Result{}, nil
 }
 
+func (r *InferenceServiceReconciler) reconcileTrafficAvailable(isvc *v1beta1.InferenceService, deploymentMode constants.DeploymentModeType) {
+	switch deploymentMode {
+	case constants.Knative:
+		// In Knative mode, during a rollout the Ready condition flips to Unknown
+		// even though the old revision is still serving traffic. TrafficAvailable
+		// must explicitly check the traffic entries.
+		if isvc.Status.IsReady() {
+			isvc.Status.MarkTrafficAvailable()
+			return
+		}
+		component, ok := isvc.Status.Components[v1beta1.PredictorComponent]
+		if !ok {
+			isvc.Status.MarkTrafficAvailableUnknown("NoStatus", "Predictor component status not yet available")
+			return
+		}
+		for _, t := range component.Traffic {
+			if t.Percent != nil && *t.Percent > 0 &&
+				(t.RevisionName == component.LatestReadyRevision || t.RevisionName == component.LatestRolledoutRevision) {
+				isvc.Status.MarkTrafficAvailable()
+				return
+			}
+		}
+		isvc.Status.MarkTrafficUnavailable("NoTraffic", "No revision is currently receiving traffic")
+	default:
+		// In Standard/RawDeployment mode, PredictorReady stays True during rolling updates
+		// because the Deployment's Available condition remains True. TrafficAvailable
+		// can therefore follow PredictorReady directly.
+		if isvc.Status.IsConditionReady(v1beta1.PredictorReady) {
+			isvc.Status.MarkTrafficAvailable()
+		} else if isvc.Status.IsConditionFalse(v1beta1.PredictorReady) {
+			isvc.Status.MarkTrafficUnavailable("PredictorNotReady", "Predictor is not ready to serve traffic")
+		} else {
+			isvc.Status.MarkTrafficAvailableUnknown("NoStatus", "Predictor status is not yet known")
+		}
+	}
+}
+
 func (r *InferenceServiceReconciler) updateStatus(ctx context.Context, desiredService *v1beta1.InferenceService,
 	deploymentMode constants.DeploymentModeType,
 ) error {
 	// set the DeploymentMode used for the InferenceService in the status
 	desiredService.Status.DeploymentMode = string(deploymentMode)
+	// compute and set the TrafficAvailable condition before persisting
+	r.reconcileTrafficAvailable(desiredService, deploymentMode)
 
 	existingService := &v1beta1.InferenceService{}
 	namespacedName := types.NamespacedName{Name: desiredService.Name, Namespace: desiredService.Namespace}

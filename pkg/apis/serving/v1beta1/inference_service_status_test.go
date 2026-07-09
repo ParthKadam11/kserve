@@ -2272,3 +2272,48 @@ func TestInferenceServiceStatus_ClearCondition(t *testing.T) {
 	// Try clearing a condition that was never set
 	status.ClearCondition(TransformerReady)
 }
+
+func TestInferenceServiceStatus_TrafficAvailable(t *testing.T) {
+	g := gomega.NewGomegaWithT(t)
+
+	t.Run("MarkTrafficAvailable sets condition to True", func(t *testing.T) {
+		status := &InferenceServiceStatus{}
+		status.InitializeConditions()
+		status.MarkTrafficAvailable()
+		cond := status.GetCondition(TrafficAvailable)
+		g.Expect(cond).NotTo(gomega.BeNil())
+		g.Expect(cond.Status).To(gomega.Equal(corev1.ConditionTrue))
+	})
+
+	t.Run("MarkTrafficUnavailable sets condition to False with reason", func(t *testing.T) {
+		status := &InferenceServiceStatus{}
+		status.InitializeConditions()
+		status.MarkTrafficUnavailable("NoTraffic", "No revision is currently receiving traffic")
+		cond := status.GetCondition(TrafficAvailable)
+		g.Expect(cond).NotTo(gomega.BeNil())
+		g.Expect(cond.Status).To(gomega.Equal(corev1.ConditionFalse))
+		g.Expect(cond.Reason).To(gomega.Equal("NoTraffic"))
+		g.Expect(cond.Message).To(gomega.Equal("No revision is currently receiving traffic"))
+	})
+
+	t.Run("MarkTrafficAvailableUnknown sets condition to Unknown", func(t *testing.T) {
+		status := &InferenceServiceStatus{}
+		status.InitializeConditions()
+		status.MarkTrafficAvailableUnknown("NoStatus", "Predictor status not yet available")
+		cond := status.GetCondition(TrafficAvailable)
+		g.Expect(cond).NotTo(gomega.BeNil())
+		g.Expect(cond.Status).To(gomega.Equal(corev1.ConditionUnknown))
+		g.Expect(cond.Reason).To(gomega.Equal("NoStatus"))
+		g.Expect(cond.Message).To(gomega.Equal("Predictor status not yet available"))
+	})
+
+	t.Run("TrafficAvailable does not affect IsReady", func(t *testing.T) {
+		status := &InferenceServiceStatus{}
+		status.InitializeConditions()
+		// Initially not ready (PredictorReady and IngressReady are Unknown)
+		g.Expect(status.IsReady()).To(gomega.BeFalse())
+		// Marking TrafficAvailable should NOT make IsReady return true
+		status.MarkTrafficAvailable()
+		g.Expect(status.IsReady()).To(gomega.BeFalse())
+	})
+}
